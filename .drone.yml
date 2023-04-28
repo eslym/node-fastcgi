@@ -23,6 +23,7 @@ steps:
     commands:
       - echo "//registry.npmjs.org/:_authToken=$TOKEN" > ~/.npmrc
       - npm whoami
+      - npm publish --access public --non-interactive
     environment:
       TOKEN:
         from_secret: npm_token
