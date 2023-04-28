@@ -1,0 +1,36 @@
+kind: pipeline
+type: docker
+name: default
+
+platform:
+  os: linux
+  arch: arm64
+
+steps:
+  - name: build
+    image: node:18-slim
+    volumes:
+      - name: yarn-cache
+        path: /cache/yarn
+    environment:
+      YARN_CACHE_FOLDER: /cache/yarn
+    commands:
+      - yarn install
+      - yarn build
+
+  - name: publish
+    image: plugins/npm
+    settings:
+      username: 0nepeop1e
+      password:
+        from_secret: npm_password
+      email: engshun.lim@gmail.com
+    access: public
+    when:
+      branch:
+        - release
+
+volumes:
+  - name: yarn-cache
+    host:
+      path: /var/cache/drone/yarn
