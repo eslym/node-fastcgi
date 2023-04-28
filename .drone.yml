@@ -19,12 +19,13 @@ steps:
       - yarn build
 
   - name: publish
-    image: plugins/npm
-    settings:
-      username: 0nepeop1e
-      password:
-        from_secret: npm_password
-      email: engshun.lim@gmail.com
+    image: node:18-slim
+    commands:
+      - echo "//registry.npmjs.org/:_authToken=${TOKEN}" > ~/.npmrc
+      - yarn publish --non-interactive --access public
+    environment:
+      TOKEN:
+        from_secret: npm_token
     access: public
     when:
       branch:
