@@ -2,12 +2,14 @@ import { nodeResolve } from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 
+/** @type {import('rollup').RollupOptions} */
 export default {
-    input: 'src/index.ts',
+    input: {
+        index: 'src/index.ts',
+    },
     output: {
-        file: 'dist/index.js',
-        format: 'module',
-        sourcemap: true
+        dir: 'dist',
+        format: 'module'
     },
     plugins: [
         nodeResolve({
