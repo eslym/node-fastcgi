@@ -92,6 +92,10 @@ export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
         return this.#stdin;
     }
 
+    get data(): NodeJS.WritableStream {
+        return this.#data;
+    }
+
     constructor({
         params,
         stdin,
