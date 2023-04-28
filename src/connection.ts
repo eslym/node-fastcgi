@@ -1,6 +1,16 @@
 import { Readable, Writable } from 'stream';
 import { EventEmitter } from './utils/emitter';
-import { Role, Config, BufferLike, Flags, Params, Status, Record, RecordType } from './protocol';
+import {
+    Role,
+    Config,
+    BufferLike,
+    Flags,
+    Params,
+    Status,
+    Record,
+    RecordType,
+    BeginRequestRecord
+} from './protocol';
 import { OutgoingRequest, IncomingRequest } from './request';
 import { ProtocolStream } from './stream';
 import { toBuffer } from './utils/buffer';
@@ -19,7 +29,11 @@ function writeAsync(stream: ProtocolStream, record: Record): Promise<void> {
 
 async function writeStream(
     stream: ProtocolStream,
-    type: typeof RecordType.STDOUT | typeof RecordType.STDIN | typeof RecordType.STDERR,
+    type:
+        | typeof RecordType.STDOUT
+        | typeof RecordType.STDIN
+        | typeof RecordType.STDERR
+        | typeof RecordType.DATA,
     requestId: number,
     data: BufferLike
 ) {
@@ -44,7 +58,7 @@ type IncomingConnectionEventMap = {
 export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap> {
     #stream: ProtocolStream;
     #requests: Map<number, IncomingRequest> = new Map();
-    #pendingRequests: Set<number> = new Set();
+    #pendingRequests: Map<number, BeginRequestRecord> = new Map();
     #config: Config;
 
     #closeConnection = false;
@@ -94,15 +108,17 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                     return;
                 }
                 this.#closeConnection = !(record.flags & Flags.KEEP_CONN);
-                this.#pendingRequests.add(record.requestId);
+                this.#pendingRequests.set(record.requestId, record);
                 break;
             case RecordType.PARAMS:
                 {
                     if (!this.#pendingRequests.has(record.requestId)) {
                         return;
                     }
+                    const begin = this.#pendingRequests.get(record.requestId)!;
                     this.#pendingRequests.delete(record.requestId);
                     const stdin = new Readable();
+                    const data = new Readable();
                     const stdout = new Writable({
                         write: (chunk, encoding, callback) => {
                             writeStream(
@@ -124,7 +140,9 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                         }
                     });
                     const request = new IncomingRequest({
+                        role: begin.role,
                         stdin,
+                        data,
                         stdout,
                         stderr,
                         params: record.params
@@ -147,15 +165,19 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                 }
                 break;
             case RecordType.STDIN:
+            case RecordType.DATA:
                 {
                     if (!this.#requests.has(record.requestId)) {
                         return;
                     }
                     const request = this.#requests.get(record.requestId)!;
+                    const readable = (
+                        record.type === RecordType.STDIN ? request.stdin : request.data
+                    ) as Readable;
                     if ((record.data as Buffer).length === 0) {
-                        (request.stdin as Readable).push(null);
+                        readable.push(null);
                     } else {
-                        (request.stdin as Readable).push(record.data);
+                        readable.push(record.data);
                     }
                 }
                 break;
@@ -197,6 +219,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
 
     #destroyRequest(request: IncomingRequest) {
         (request.stdin as Readable).destroy();
+        (request.data as Readable).destroy();
         (request.stdout as Writable).destroy();
         (request.stderr as Writable).destroy();
     }
@@ -208,6 +231,7 @@ type OutgoingConnectionEventMap = {
 };
 
 interface BeginRequestOptions {
+    role?: Role;
     keepAlive?: boolean;
 }
 
@@ -251,7 +275,7 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
 
     async beginRequest(
         params: Params,
-        { keepAlive = true }: BeginRequestOptions = {}
+        { role = Role.RESPONDER, keepAlive = true }: BeginRequestOptions = {}
     ): Promise<OutgoingRequest> {
         const downStreamConfig = await this.getValues();
         const shouldKeepAlive = keepAlive && downStreamConfig.FCGI_MPXS_CONNS;
@@ -265,12 +289,20 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
                         callback
                     );
                 }
+            }),
+            data: new Writable({
+                write: (chunk, encoding, callback) => {
+                    writeStream(this.#stream, RecordType.DATA, requestId, chunk).then(
+                        () => callback(),
+                        callback
+                    );
+                }
             })
         });
         this.#requests.set(requestId, request);
         await writeAsync(this.#stream, {
             type: RecordType.BEGIN_REQUEST,
-            role: Role.RESPONDER,
+            role,
             requestId,
             flags: shouldKeepAlive ? Flags.KEEP_CONN : 0
         });

@@ -1,5 +1,5 @@
 import { EventEmitter } from './utils/emitter';
-import { Params } from './protocol';
+import { Params, Role } from './protocol';
 
 type IncomingRequestEvent = {
     error: (error: Error) => void;
@@ -8,14 +8,24 @@ type IncomingRequestEvent = {
 };
 
 export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
+    #role: Role;
     #stdin: NodeJS.ReadableStream;
+    #data: NodeJS.ReadableStream;
     #stdout: NodeJS.WritableStream;
     #stderr: NodeJS.WritableStream;
 
     #params: Params;
 
+    get role(): Role {
+        return this.#role;
+    }
+
     get stdin(): NodeJS.ReadableStream {
         return this.#stdin;
+    }
+
+    get data(): NodeJS.ReadableStream {
+        return this.#data;
     }
 
     get stdout(): NodeJS.WritableStream {
@@ -31,18 +41,24 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
     }
 
     constructor({
+        role,
         stdin,
+        data,
         stdout,
         stderr,
         params
     }: {
+        role?: Role;
         stdin: NodeJS.ReadableStream;
+        data: NodeJS.ReadableStream;
         stdout: NodeJS.WritableStream;
         stderr: NodeJS.WritableStream;
         params: Params;
     }) {
         super();
+        this.#role = role ?? Role.RESPONDER;
         this.#stdin = stdin;
+        this.#data = data;
         this.#stdout = stdout;
         this.#stderr = stderr;
         this.#params = params;
@@ -66,6 +82,7 @@ type OutgoingRequestEvent = {
 export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
     #params: Params;
     #stdin: NodeJS.WritableStream;
+    #data: NodeJS.WritableStream;
 
     get params(): Params {
         return this.#params;
@@ -75,10 +92,19 @@ export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
         return this.#stdin;
     }
 
-    constructor({ params, stdin }: { params: Params; stdin: NodeJS.WritableStream }) {
+    constructor({
+        params,
+        stdin,
+        data
+    }: {
+        params: Params;
+        stdin: NodeJS.WritableStream;
+        data: NodeJS.WritableStream;
+    }) {
         super();
         this.#params = params;
         this.#stdin = stdin;
+        this.#data = data;
     }
 
     abort() {
