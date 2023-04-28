@@ -22,7 +22,7 @@ steps:
     image: node:18-slim
     commands:
       - echo "//registry.npmjs.org/:_authToken=\$TOKEN" > ~/.npmrc
-      - yarn publish --non-interactive --access public
+      - npm publish --non-interactive --access public
     environment:
       TOKEN:
         from_secret: npm_token
