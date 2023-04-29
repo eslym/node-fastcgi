@@ -7,7 +7,7 @@ import {
     Flags,
     Params,
     Status,
-    Record,
+    FastCGIRecord,
     RecordType,
     BeginRequestRecord
 } from './protocol';
@@ -15,7 +15,7 @@ import { OutgoingRequest, IncomingRequest } from './request';
 import { ProtocolStream } from './stream';
 import { toBuffer } from './utils/buffer';
 
-function writeAsync(stream: ProtocolStream, record: Record): Promise<void> {
+function writeAsync(stream: ProtocolStream, record: FastCGIRecord): Promise<void> {
     return new Promise((resolve, reject) => {
         stream.write(record, undefined, (error) => {
             if (error) {
@@ -27,6 +27,28 @@ function writeAsync(stream: ProtocolStream, record: Record): Promise<void> {
     });
 }
 
+class DummyReadable extends Readable {
+    _read() {}
+}
+
+function createWriteStream(
+    stream: ProtocolStream,
+    type:
+        | typeof RecordType.STDOUT
+        | typeof RecordType.STDIN
+        | typeof RecordType.STDERR
+        | typeof RecordType.DATA
+) {
+    return new Writable({
+        write(chunk, encoding, callback) {
+            writeStream(stream, type, 0, chunk).then(callback as () => void, callback);
+        },
+        final(callback) {
+            writeStream(stream, type, 0, null).then(callback as () => void, callback);
+        }
+    });
+}
+
 async function writeStream(
     stream: ProtocolStream,
     type:
@@ -35,7 +57,7 @@ async function writeStream(
         | typeof RecordType.STDERR
         | typeof RecordType.DATA,
     requestId: number,
-    data: BufferLike
+    data: BufferLike | null
 ) {
     let buffer = toBuffer(data);
     do {
@@ -71,7 +93,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
         super();
         this.#stream = stream;
         this.#config = config;
-        this.#stream.on('data', (record: Record) => {
+        this.#stream.on('data', (record: FastCGIRecord) => {
             this.#handleRecord(record);
         });
 
@@ -94,7 +116,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
         this.emit('close');
     }
 
-    #handleRecord(record: Record) {
+    #handleRecord(record: FastCGIRecord) {
         switch (record.type) {
             case RecordType.BEGIN_REQUEST:
                 if (
@@ -117,28 +139,10 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                     }
                     const begin = this.#pendingRequests.get(record.requestId)!;
                     this.#pendingRequests.delete(record.requestId);
-                    const stdin = new Readable();
-                    const data = new Readable();
-                    const stdout = new Writable({
-                        write: (chunk, encoding, callback) => {
-                            writeStream(
-                                this.#stream,
-                                RecordType.STDOUT,
-                                record.requestId,
-                                chunk
-                            ).then(() => callback(), callback);
-                        }
-                    });
-                    const stderr = new Writable({
-                        write: (chunk, encoding, callback) => {
-                            writeStream(
-                                this.#stream,
-                                RecordType.STDERR,
-                                record.requestId,
-                                chunk
-                            ).then(() => callback(), callback);
-                        }
-                    });
+                    const stdin = new DummyReadable();
+                    const data = new DummyReadable();
+                    const stdout = createWriteStream(this.#stream, RecordType.STDOUT);
+                    const stderr = createWriteStream(this.#stream, RecordType.STDERR);
                     const request = new IncomingRequest({
                         role: begin.role,
                         stdin,
@@ -148,8 +152,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                         params: record.params
                     });
                     this.#requests.set(record.requestId, request);
-                    this.emit('request', request);
-                    request.on('end', (status: number = 0) => {
+                    request.once('end', (status: number = 0) => {
                         this.#stream.write({
                             type: RecordType.END_REQUEST,
                             requestId: record.requestId,
@@ -162,6 +165,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                             this.destroy();
                         }
                     });
+                    this.emit('request', request);
                 }
                 break;
             case RecordType.STDIN:
@@ -282,22 +286,8 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         const requestId = (this.#accId++ % 0xffff) + 1;
         const request = new OutgoingRequest({
             params,
-            stdin: new Writable({
-                write: (chunk, encoding, callback) => {
-                    writeStream(this.#stream, RecordType.STDIN, requestId, chunk).then(
-                        () => callback(),
-                        callback
-                    );
-                }
-            }),
-            data: new Writable({
-                write: (chunk, encoding, callback) => {
-                    writeStream(this.#stream, RecordType.DATA, requestId, chunk).then(
-                        () => callback(),
-                        callback
-                    );
-                }
-            })
+            stdin: createWriteStream(this.#stream, RecordType.STDIN),
+            data: createWriteStream(this.#stream, RecordType.DATA)
         });
         this.#requests.set(requestId, request);
         await writeAsync(this.#stream, {
@@ -324,7 +314,7 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         this.#stream.destroy();
     }
 
-    #handleRecord(record: Record) {
+    #handleRecord(record: FastCGIRecord) {
         switch (record.type) {
             case RecordType.GET_VALUES_RESULT:
                 if (record.requestId !== 0) {

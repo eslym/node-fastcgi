@@ -65,9 +65,9 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
     }
 
     end(status?: number) {
-        this.emit('end', status);
         this.#stdout.end();
         this.#stderr.end();
+        this.emit('end', status);
     }
 }
 

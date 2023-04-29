@@ -136,7 +136,7 @@ export interface UnknownTypeRecord extends BaseRecord {
     unknownType: number;
 }
 
-export type Record =
+export type FastCGIRecord =
     | BeginRequestRecord
     | AbortRequestRecord
     | EndRequestRecord

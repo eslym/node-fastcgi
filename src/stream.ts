@@ -8,7 +8,7 @@ export class ProtocolStream extends Duplex {
     #stream: Duplex;
 
     constructor(stream: Duplex, encoderChunkSize?: number) {
-        super();
+        super({ objectMode: true });
         this.#stream = stream;
 
         this.#encoder = new Encoder(encoderChunkSize);
@@ -44,6 +44,8 @@ export class ProtocolStream extends Duplex {
             this.#stream.destroy();
         });
     }
+
+    _read(size: number): void {}
 
     _write(
         chunk: any,

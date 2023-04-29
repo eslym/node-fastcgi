@@ -1,21 +1,134 @@
 import { isArrayBufferView } from 'util/types';
 import { Transform, TransformCallback } from 'stream';
-import {
-    RecordHeader,
-    Record,
-    Protocol,
-    RecordType,
-    Role,
-    Status,
-    Params
-} from './protocol';
+import { RecordHeader, FastCGIRecord, Protocol, RecordType, Role, Status, Params } from './protocol';
+
+
+
+function decodeRecordBody(header: RecordHeader, data: Buffer): FastCGIRecord {
+    switch (header.type) {
+        case RecordType.BEGIN_REQUEST:
+            return {
+                type: RecordType.BEGIN_REQUEST,
+                requestId: header.requestId,
+                role: data.readUInt16BE(0) as Role,
+                flags: data.readUInt8(2)
+            };
+        case RecordType.ABORT_REQUEST:
+            return {
+                type: RecordType.ABORT_REQUEST,
+                requestId: header.requestId
+            };
+        case RecordType.END_REQUEST:
+            return {
+                type: RecordType.END_REQUEST,
+                requestId: header.requestId,
+                appStatus: data.readUInt32BE(0),
+                protocolStatus: data.readUInt8(4) as Status
+            };
+        case RecordType.PARAMS: {
+            const params: Params = {} as any;
+            let i = 0;
+            while (i < data.length) {
+                const pair = decodeNameValuePair(data.subarray(i));
+                i += pair.bytes;
+                params[pair.name] = pair.value;
+            }
+            return {
+                type: RecordType.PARAMS,
+                requestId: header.requestId,
+                params
+            };
+        }
+        case RecordType.STDIN:
+        case RecordType.STDOUT:
+        case RecordType.STDERR:
+        case RecordType.DATA:
+            return {
+                type: header.type,
+                requestId: header.requestId,
+                data
+            };
+        case RecordType.GET_VALUES: {
+            const keys: string[] = [];
+            let i = 0;
+            while (i < data.length) {
+                const pair = decodeNameValuePair(data.subarray(i));
+                i += pair.bytes;
+                keys.push(pair.name);
+            }
+            return {
+                type: RecordType.GET_VALUES,
+                requestId: header.requestId,
+                keys
+            };
+        }
+        case RecordType.GET_VALUES_RESULT: {
+            const values: { [key: string]: string } = {};
+            let i = 0;
+            while (i < data.length) {
+                const pair = decodeNameValuePair(data.subarray(i));
+                i += pair.bytes;
+                values[pair.name] = pair.value;
+            }
+            return {
+                type: RecordType.GET_VALUES_RESULT,
+                requestId: header.requestId,
+                values
+            };
+        }
+        case RecordType.UNKNOWN_TYPE:
+            const type = data.readUInt8(0);
+            return {
+                type: RecordType.UNKNOWN_TYPE,
+                requestId: header.requestId,
+                unknownType: type
+            };
+        default:
+            throw new Error(`Unknown record type: ${header.type}`);
+    }
+}
+
+function decodeNameValuePair(data: Buffer): { bytes: number; name: string; value: string } {
+    let offset = 0;
+    let nameLen = data.readUint8(0);
+    if (nameLen & 0x80) {
+        nameLen =
+            ((nameLen & 0x7f) << 24) |
+            (data.readUint8(1) << 16) |
+            (data.readUint8(2) << 8) |
+            data.readUint8(3);
+        offset = 4;
+    } else {
+        offset = 1;
+    }
+    let valueLen = data.readUint8(offset);
+    if (valueLen & 0x80) {
+        valueLen =
+            ((valueLen & 0x7f) << 24) |
+            (data.readUint8(offset + 1) << 16) |
+            (data.readUint8(offset + 2) << 8) |
+            data.readUint8(offset + 3);
+        offset += 4;
+    } else {
+        offset += 1;
+    }
+    const name = data.subarray(offset, offset + nameLen).toString();
+    offset += nameLen;
+    const value = data.subarray(offset, offset + valueLen).toString();
+    offset += valueLen;
+    return {
+        bytes: offset,
+        name,
+        value
+    };
+}
 
 export class Decoder extends Transform {
     #buffer: Buffer = Buffer.from([]);
     #tempHeader?: RecordHeader;
 
     constructor() {
-        super();
+        super({ readableObjectMode: true });
     }
 
     _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback): void {
@@ -70,7 +183,7 @@ export class Decoder extends Transform {
         const contentData = this.#buffer.subarray(0, this.#tempHeader.contentLength);
 
         try {
-            const record = this.#decodeRecordBody(this.#tempHeader, contentData);
+            const record = decodeRecordBody(this.#tempHeader, contentData);
             this.push(record);
         } catch (err) {
             callback(err as Error);
@@ -91,109 +204,5 @@ export class Decoder extends Transform {
             return;
         }
         callback();
-    }
-
-    #decodeRecordBody(header: RecordHeader, data: Buffer): Record {
-        switch (header.type) {
-            case RecordType.BEGIN_REQUEST:
-                return {
-                    type: RecordType.BEGIN_REQUEST,
-                    requestId: header.requestId,
-                    role: data.readUInt16BE(0) as Role,
-                    flags: data.readUInt8(2)
-                };
-            case RecordType.ABORT_REQUEST:
-                return {
-                    type: RecordType.ABORT_REQUEST,
-                    requestId: header.requestId
-                };
-            case RecordType.END_REQUEST:
-                return {
-                    type: RecordType.END_REQUEST,
-                    requestId: header.requestId,
-                    appStatus: data.readUInt32BE(0),
-                    protocolStatus: data.readUInt8(4) as Status
-                };
-            case RecordType.PARAMS:
-                const params: Params = {} as any;
-                let i = 0;
-                while (i < data.length) {
-                    const nameLen = data.readUInt16BE(i);
-                    i += 2;
-                    if (nameLen === 0) {
-                        break;
-                    }
-                    const name = data.subarray(i, i + nameLen).toString();
-                    i += nameLen;
-                    const valueLen = data.readUInt16BE(i);
-                    i += 2;
-                    const value = data.subarray(i, i + valueLen).toString();
-                    i += valueLen;
-                    params[name] = value;
-                }
-                return {
-                    type: RecordType.PARAMS,
-                    requestId: header.requestId,
-                    params
-                };
-            case RecordType.STDIN:
-            case RecordType.STDOUT:
-            case RecordType.STDERR:
-            case RecordType.DATA:
-                return {
-                    type: header.type,
-                    requestId: header.requestId,
-                    data
-                };
-            case RecordType.GET_VALUES:
-                const keys: string[] = [];
-                let j = 0;
-                while (j < data.length) {
-                    const keyLen = data.readUInt16BE(j);
-                    j += 2;
-                    if (keyLen === 0) {
-                        break;
-                    }
-                    const key = data.subarray(j, j + keyLen).toString();
-                    j += keyLen;
-                    keys.push(key);
-                }
-                return {
-                    type: RecordType.GET_VALUES,
-                    requestId: header.requestId,
-                    keys
-                };
-            case RecordType.GET_VALUES_RESULT:
-                const values: { [key: string]: string } = {};
-                let k = 0;
-                while (k < data.length) {
-                    const keyLen = data.readUInt16BE(k);
-                    k += 2;
-                    if (keyLen === 0) {
-                        break;
-                    }
-                    const key = data.subarray(k, k + keyLen).toString();
-                    k += keyLen;
-                    const valueLen = data.readUInt16BE(k);
-                    k += 2;
-                    const value = data.subarray(k, k + valueLen).toString();
-                    k += valueLen;
-                    values[key] = value;
-                }
-                return {
-                    type: RecordType.GET_VALUES_RESULT,
-                    requestId: header.requestId,
-                    values
-                };
-            case RecordType.UNKNOWN_TYPE:
-                const type = data.readUInt8(0);
-                return {
-                    type: RecordType.UNKNOWN_TYPE,
-                    requestId: header.requestId,
-                    unknownType: type
-                };
-            default:
-                throw new Error(`Unknown record type: ${header.type}`);
-        }
     }
 }

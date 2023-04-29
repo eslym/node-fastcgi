@@ -1,5 +1,5 @@
 import { Transform, TransformCallback } from 'stream';
-import { Protocol, Record, RecordType, StreamRecord } from './protocol';
+import { Protocol, FastCGIRecord, RecordType, StreamRecord } from './protocol';
 import assert from 'assert';
 import { toBuffer } from './utils/buffer';
 
@@ -12,7 +12,7 @@ const dataReocrds = new Set<RecordType>([
     RecordType.DATA
 ]);
 
-function encodeRecord(record: Record, chunkSize: number) {
+function encodeRecord(record: FastCGIRecord, chunkSize: number) {
     const headerBuffer = Buffer.alloc(Protocol.HEADER_LEN);
     headerBuffer.writeUInt8(Protocol.VERSION, 0);
     headerBuffer.writeUInt8(record.type, 1);
@@ -25,7 +25,7 @@ function encodeRecord(record: Record, chunkSize: number) {
     return Buffer.concat([headerBuffer, contentBuffer, paddingBuffer]);
 }
 
-function encodeRecordBody(record: Record): Buffer {
+function encodeRecordBody(record: FastCGIRecord): Buffer {
     if (dataReocrds.has(record.type)) {
         return toBuffer((record as StreamRecord).data);
     }
@@ -47,33 +47,18 @@ function encodeRecordBody(record: Record): Buffer {
         case RecordType.PARAMS:
             for (const [name, value] of Object.entries(record.params)) {
                 if (value === undefined) continue;
-                const nameBuffer = Buffer.from(name);
-                const valueBuffer = Buffer.from(value);
-                const nameLenBuffer = Buffer.alloc(2);
-                const valueLenBuffer = Buffer.alloc(2);
-                nameLenBuffer.writeUInt16BE(nameBuffer.length, 0);
-                valueLenBuffer.writeUInt16BE(valueBuffer.length, 0);
-                arr.push(nameLenBuffer, nameBuffer, valueLenBuffer, valueBuffer);
+                arr.push(encodeKeyValuePair(name, value));
             }
             return Buffer.concat(arr);
         case RecordType.GET_VALUES:
             for (const name of record.keys) {
-                const nameBuffer = Buffer.from(name);
-                const nameLenBuffer = Buffer.alloc(2);
-                nameLenBuffer.writeUInt16BE(nameBuffer.length, 0);
-                arr.push(nameLenBuffer, nameBuffer);
+                arr.push(encodeKeyValuePair(name, ''));
             }
             return Buffer.concat(arr);
         case RecordType.GET_VALUES_RESULT:
             for (const [name, value] of Object.entries(record.values)) {
                 if (value === undefined) continue;
-                const nameBuffer = Buffer.from(name);
-                const valueBuffer = Buffer.from(value);
-                const nameLenBuffer = Buffer.alloc(2);
-                const valueLenBuffer = Buffer.alloc(2);
-                nameLenBuffer.writeUInt16BE(nameBuffer.length, 0);
-                valueLenBuffer.writeUInt16BE(valueBuffer.length, 0);
-                arr.push(nameLenBuffer, nameBuffer, valueLenBuffer, valueBuffer);
+                arr.push(encodeKeyValuePair(name, value));
             }
             return Buffer.concat(arr);
         case RecordType.UNKNOWN_TYPE:
@@ -85,11 +70,33 @@ function encodeRecordBody(record: Record): Buffer {
     }
 }
 
+function encodeKeyValuePair(name: string, value: string): Buffer {
+    const nameBuffer = Buffer.from(name);
+    const valueBuffer = Buffer.from(value);
+    let nameLenBuffer: Buffer;
+    if (nameBuffer.length < 0x80) {
+        nameLenBuffer = Buffer.alloc(1);
+        nameLenBuffer.writeUInt8(nameBuffer.length, 0);
+    } else {
+        nameLenBuffer = Buffer.alloc(4);
+        nameLenBuffer.writeUInt16BE(nameBuffer.length | 0x8000, 0);
+    }
+    let valueLenBuffer: Buffer;
+    if (valueBuffer.length < 0x80) {
+        valueLenBuffer = Buffer.alloc(1);
+        valueLenBuffer.writeUInt8(valueBuffer.length, 0);
+    } else {
+        valueLenBuffer = Buffer.alloc(4);
+        valueLenBuffer.writeUInt16BE(valueBuffer.length | 0x8000, 0);
+    }
+    return Buffer.concat([nameLenBuffer, nameBuffer, valueLenBuffer, valueBuffer]);
+}
+
 export class Encoder extends Transform {
     #fitToChunk: number = 0;
 
     constructor(fitToChunk: number = DEFAULT_CHUNK_SIZE) {
-        super();
+        super({ writableObjectMode: true });
         assert(
             typeof fitToChunk === 'number' && fitToChunk > 0 && fitToChunk <= 255,
             'Invalid chunk size'
@@ -98,12 +105,7 @@ export class Encoder extends Transform {
     }
 
     _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback): void {
-        const record = chunk as Record;
-        if (typeof record === 'string') {
-            callback(new Error(record));
-            return;
-        }
-        this.push(encodeRecord(record, this.#fitToChunk));
-        callback(null);
+        this.push(encodeRecord(chunk as FastCGIRecord, this.#fitToChunk));
+        callback();
     }
 }
