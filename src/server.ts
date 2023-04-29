@@ -18,6 +18,14 @@ export class Server extends EventEmitter<ServerEventMap> {
     #connections: Set<Socket> = new Set();
     #requests: Set<IncomingRequest> = new Set();
 
+    get connections(): ReadonlySet<Socket> {
+        return this.#connections;
+    }
+
+    get requests(): ReadonlySet<IncomingRequest> {
+        return this.#requests;
+    }
+
     constructor(config: Config = {}) {
         super();
         this.#config = config;
