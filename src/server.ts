@@ -74,8 +74,6 @@ export class Server extends EventEmitter<ServerEventMap> {
                     this.#config.FCGI_MAX_REQS &&
                     this.#requests.size >= this.#config.FCGI_MAX_REQS
                 ) {
-                    request.stdout.write('503 Service Unavailable\r\n\r\n');
-                    request.stdout.end();
                     request.end(0);
                     return;
                 }
