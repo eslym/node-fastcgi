@@ -4,6 +4,7 @@ import { Socket, Server as TCPServer } from 'net';
 import { EventEmitter } from './utils/emitter';
 import { ProtocolStream } from './stream';
 import { Config } from './protocol';
+import { Abortable } from 'events';
 
 type ServerEventMap = {
     connection: (connection: IncomingConnection) => void;
@@ -11,6 +12,24 @@ type ServerEventMap = {
     error: (error: Error) => void;
     close: () => void;
 };
+
+interface ServerConfig extends Config {
+    server?: TCPServer;
+}
+
+interface ListenOptions extends Abortable {
+    port?: number | undefined;
+    host?: string | undefined;
+    backlog?: number | undefined;
+    path?: string | undefined;
+    exclusive?: boolean | undefined;
+    readableAll?: boolean | undefined;
+    writableAll?: boolean | undefined;
+    /**
+     * @default false
+     */
+    ipv6Only?: boolean | undefined;
+}
 
 export class Server extends EventEmitter<ServerEventMap> {
     #server: TCPServer;
@@ -26,10 +45,10 @@ export class Server extends EventEmitter<ServerEventMap> {
         return this.#requests;
     }
 
-    constructor(config: Config = {}) {
+    constructor(config: ServerConfig = {}) {
         super();
         this.#config = config;
-        this.#server = new TCPServer();
+        this.#server = config.server ?? new TCPServer();
         this.#server.on('connection', (socket) => {
             this.emit(
                 'connection',
@@ -76,11 +95,22 @@ export class Server extends EventEmitter<ServerEventMap> {
         }
     }
 
-    listen(port: number, host?: string) {
-        this.#server.listen(port, host);
+    listen(port?: number, hostname?: string, backlog?: number): this;
+    listen(port?: number, hostname?: string): this;
+    listen(port?: number, backlog?: number): this;
+    listen(port?: number): this;
+    listen(path: string, backlog?: number): this;
+    listen(path: string): this;
+    listen(options: ListenOptions): this;
+    listen(handle: any, backlog?: number): this;
+    listen(handle: any): this;
+    listen(...args: any[]) {
+        this.#server.listen(...args);
+        return this;
     }
 
     close() {
         this.#server.close();
+        return this;
     }
 }
