@@ -1,6 +1,6 @@
 # node-fastcgi
 
-An implementation of [fastcgi protocol](https://fast-cgi.github.io/) for NodeJS, currently not stable.
+An implementation of [fastcgi protocol](https://fast-cgi.github.io/) for NodeJS
 
 ```shell
 npm i @eslym/fastcgi
