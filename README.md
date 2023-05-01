@@ -18,9 +18,11 @@ yarn add @eslym/fastcgi
 import { Server } from '@eslym/fastcgi';
 
 const server = new Server({
-    FCGI_MAX_CONNS: 10,
-    FCGI_MAX_REQS: 50,
-    FCGI_MPXS_CONNS: true
+    fastcgi: {
+        FCGI_MAX_CONNS: 10,
+        FCGI_MAX_REQS: 50,
+        FCGI_MPXS_CONNS: true
+    }
 });
 
 async function writeAsync(stream, data) {
@@ -62,9 +64,11 @@ server.listen(9000);
 import { Server, handleHttp } from '@eslym/fastcgi';
 
 const server = new Server({
-    FCGI_MAX_CONNS: 10,
-    FCGI_MAX_REQS: 50,
-    FCGI_MPXS_CONNS: true
+    fastcgi: {
+        FCGI_MAX_CONNS: 10,
+        FCGI_MAX_REQS: 50,
+        FCGI_MPXS_CONNS: true
+    }
 });
 
 async function readAsync(stream) {
