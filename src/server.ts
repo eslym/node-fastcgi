@@ -2,9 +2,11 @@ import { IncomingConnection } from './connection';
 import { IncomingRequest } from './request';
 import { Socket, Server as TCPServer } from 'net';
 import { EventEmitter } from './utils/emitter';
-import { ProtocolStream } from './stream';
 import { Config } from './protocol';
 import { Abortable } from 'events';
+import { Decoder } from './decoder';
+import { Encoder } from './encoder';
+import { Duplex } from 'stream';
 
 type ServerEventMap = {
     connection: (connection: IncomingConnection) => void;
@@ -13,8 +15,10 @@ type ServerEventMap = {
     close: () => void;
 };
 
-interface ServerConfig extends Config {
+interface ServerConfig {
+    paddingFitToChunk?: number;
     server?: TCPServer;
+    fastcgi?: Config;
 }
 
 interface ListenOptions extends Abortable {
@@ -47,16 +51,28 @@ export class Server extends EventEmitter<ServerEventMap> {
 
     constructor(config: ServerConfig = {}) {
         super();
-        this.#config = config;
+        this.#config = config.fastcgi ?? {};
+        this.#config.FCGI_MPXS_CONNS = config.fastcgi?.FCGI_MPXS_CONNS ?? true;
         this.#server = config.server ?? new TCPServer();
         this.#server.on('connection', (socket) => {
-            this.emit(
-                'connection',
-                new IncomingConnection(new ProtocolStream(socket), this.#config)
-            );
+            const encoder = new Encoder(config.paddingFitToChunk);
+            const decoder = new Decoder();
+            socket.pipe(decoder);
+            encoder.pipe(socket);
+            const stream = Duplex.from({
+                readable: decoder,
+                writable: encoder
+            });
+            const connection = new IncomingConnection(stream);
+            this.emit('connection', connection);
             this.#connections.add(socket);
             socket.on('close', () => {
                 this.#connections.delete(socket);
+                connection.close();
+            });
+            connection.on('close', () => {
+                this.#connections.delete(socket);
+                socket.destroy();
             });
         });
 

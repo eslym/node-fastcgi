@@ -1,8 +1,14 @@
 import { isArrayBufferView } from 'util/types';
 import { Transform, TransformCallback } from 'stream';
-import { RecordHeader, FastCGIRecord, Protocol, RecordType, Role, Status, Params } from './protocol';
-
-
+import {
+    RecordHeader,
+    FastCGIRecord,
+    Protocol,
+    RecordType,
+    Role,
+    Status,
+    Params
+} from './protocol';
 
 function decodeRecordBody(header: RecordHeader, data: Buffer): FastCGIRecord {
     switch (header.type) {

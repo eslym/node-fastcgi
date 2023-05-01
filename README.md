@@ -12,6 +12,8 @@ yarn add @eslym/fastcgi
 
 ## Usage
 
+### Simple Usage
+
 ```typescript
 import { Server } from '@eslym/fastcgi';
 
@@ -45,6 +47,54 @@ server.on('request', async (req) => {
     } catch (e) {
         console.error(e);
     }
+});
+
+server.on('error', (err) => {
+    console.error(err);
+});
+
+server.listen(9000);
+```
+
+### HTTP Helper
+
+```typescript
+import { Server, handleHttp } from '@eslym/fastcgi';
+
+const server = new Server({
+    FCGI_MAX_CONNS: 10,
+    FCGI_MAX_REQS: 50,
+    FCGI_MPXS_CONNS: true
+});
+
+async function readAsync(stream) {
+    return new Promise((resolve, reject) => {
+        let data: Buffer[] = [];
+        stream.on('data', (chunk) => {
+            data.push(chunk);
+        });
+        stream.on('end', () => {
+            resolve(Buffer.concat(data));
+        });
+        stream.on('error', (err) => {
+            reject(err);
+        });
+    });
+}
+
+server.on('request', (request) => {
+    console.log('FastCGI Params', request.params);
+    handleHttp(async (req, res) => {
+        console.log('HTTP Headers', req.headers);
+        if (req.headers['content-length'] !== '0') {
+            const body = await readAsync(req);
+            console.log('HTTP Body', body.toString());
+        }
+        res.writeHead(200, {
+            'Content-Type': 'text/plain'
+        });
+        res.end('Hello World');
+    })(request);
 });
 
 server.on('error', (err) => {

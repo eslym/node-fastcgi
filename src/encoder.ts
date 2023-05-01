@@ -12,12 +12,12 @@ const dataReocrds = new Set<RecordType>([
     RecordType.DATA
 ]);
 
-function encodeRecord(record: FastCGIRecord, chunkSize: number) {
+function encodeRecord(record: FastCGIRecord, chunkSize: number, encoding: BufferEncoding): Buffer {
     const headerBuffer = Buffer.alloc(Protocol.HEADER_LEN);
     headerBuffer.writeUInt8(Protocol.VERSION, 0);
     headerBuffer.writeUInt8(record.type, 1);
     headerBuffer.writeUInt16BE(record.requestId, 2);
-    const contentBuffer = encodeRecordBody(record);
+    const contentBuffer = encodeRecordBody(record, encoding);
     const paddingLength = chunkSize - (contentBuffer.length % chunkSize);
     const paddingBuffer = Buffer.alloc(paddingLength);
     headerBuffer.writeUInt16BE(contentBuffer.length, 4);
@@ -25,9 +25,9 @@ function encodeRecord(record: FastCGIRecord, chunkSize: number) {
     return Buffer.concat([headerBuffer, contentBuffer, paddingBuffer]);
 }
 
-function encodeRecordBody(record: FastCGIRecord): Buffer {
+function encodeRecordBody(record: FastCGIRecord, encoding: BufferEncoding): Buffer {
     if (dataReocrds.has(record.type)) {
-        return toBuffer((record as StreamRecord).data);
+        return toBuffer((record as StreamRecord).data, encoding);
     }
     let buffer: Buffer;
     let arr: Buffer[] = [];
@@ -44,23 +44,29 @@ function encodeRecordBody(record: FastCGIRecord): Buffer {
             buffer.writeUInt32BE(record.appStatus, 0);
             buffer.writeUInt8(record.protocolStatus, 4);
             return buffer;
-        case RecordType.PARAMS:
-            for (const [name, value] of Object.entries(record.params)) {
+        case RecordType.PARAMS: {
+            const entries = Object.entries(record.params);
+            for (let i = 0; i < entries.length; i++) {
+                const [name, value] = entries[i];
                 if (value === undefined) continue;
                 arr.push(encodeKeyValuePair(name, value));
             }
             return Buffer.concat(arr);
+        }
         case RecordType.GET_VALUES:
-            for (const name of record.keys) {
-                arr.push(encodeKeyValuePair(name, ''));
+            for (let i = 0; i < record.keys.length; i++) {
+                arr.push(encodeKeyValuePair(record.keys[i], ''));
             }
             return Buffer.concat(arr);
-        case RecordType.GET_VALUES_RESULT:
-            for (const [name, value] of Object.entries(record.values)) {
+        case RecordType.GET_VALUES_RESULT: {
+            const entries = Object.entries(record.values);
+            for (let i = 0; i < entries.length; i++) {
+                const [name, value] = entries[i];
                 if (value === undefined) continue;
                 arr.push(encodeKeyValuePair(name, value));
             }
             return Buffer.concat(arr);
+        }
         case RecordType.UNKNOWN_TYPE:
             buffer = Buffer.alloc(8);
             buffer.writeUint8(record.unknownType, 0);
@@ -105,7 +111,7 @@ export class Encoder extends Transform {
     }
 
     _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback): void {
-        this.push(encodeRecord(chunk as FastCGIRecord, this.#fitToChunk));
+        this.push(encodeRecord(chunk as FastCGIRecord, this.#fitToChunk, encoding));
         callback();
     }
 }

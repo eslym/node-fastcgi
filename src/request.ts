@@ -73,8 +73,6 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
 
 type OutgoingRequestEvent = {
     error: (error: Error) => void;
-    stdout: (chunk: Buffer | null) => void;
-    stderr: (chunk: Buffer | null) => void;
     end: (status?: number) => void;
     abort: () => void;
 };
@@ -83,6 +81,8 @@ export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
     #params: Params;
     #stdin: NodeJS.WritableStream;
     #data: NodeJS.WritableStream;
+    #stdout: NodeJS.ReadableStream;
+    #stderr: NodeJS.ReadableStream;
 
     get params(): Params {
         return this.#params;
@@ -96,19 +96,33 @@ export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
         return this.#data;
     }
 
+    get stdout(): NodeJS.ReadableStream {
+        return this.#stdout;
+    }
+
+    get stderr(): NodeJS.ReadableStream {
+        return this.#stderr;
+    }
+
     constructor({
         params,
         stdin,
-        data
+        data,
+        stdout,
+        stderr
     }: {
         params: Params;
         stdin: NodeJS.WritableStream;
         data: NodeJS.WritableStream;
+        stdout: NodeJS.ReadableStream;
+        stderr: NodeJS.ReadableStream;
     }) {
         super();
         this.#params = params;
         this.#stdin = stdin;
         this.#data = data;
+        this.#stdout = stdout;
+        this.#stderr = stderr;
     }
 
     abort() {
