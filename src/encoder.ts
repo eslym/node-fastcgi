@@ -110,7 +110,7 @@ function encodeKeyValuePair(name: string, value: string): Buffer[] {
         valueLenBuffer = Buffer.alloc(4);
         valueLenBuffer.writeUInt32BE(valueBuffer.length | 0x80000000, 0);
     }
-    return [nameLenBuffer, nameBuffer, valueLenBuffer, valueBuffer];
+    return [nameLenBuffer, valueLenBuffer, nameBuffer, valueBuffer];
 }
 
 export class Encoder extends Transform {
