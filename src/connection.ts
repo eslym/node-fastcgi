@@ -11,10 +11,9 @@ import {
     BeginRequestRecord
 } from './protocol';
 import { OutgoingRequest, IncomingRequest } from './request';
-import { BufferLike, toBuffer } from './utils/buffer';
 import { noop, returnThis } from './utils/noop';
 
-function writeAsync(stream: Writable, record: FastCGIRecord): Promise<void> {
+function writeAsync(stream: Writable, record: FastCGIRecord | FastCGIRecord[]): Promise<void> {
     return new Promise((resolve, reject) => {
         stream.write(record, (error) => {
             if (error) {
@@ -40,10 +39,23 @@ function createWriteStream(
 ) {
     return new Writable({
         write(chunk, encoding, callback) {
-            writeStream(stream, type, 0, chunk, encoding).then(callback as () => void, callback);
+            stream.write(
+                {
+                    type,
+                    data: chunk
+                },
+                encoding,
+                callback
+            );
         },
         final(callback) {
-            writeStream(stream, type, 0, null, 'utf8').then(callback as () => void, callback);
+            stream.write(
+                {
+                    type,
+                    data: null
+                },
+                callback
+            );
         }
     });
 }
@@ -59,29 +71,6 @@ function destroyRequest(request: IncomingRequest | OutgoingRequest) {
     (request.stderr as any as destroyable).destroy();
 }
 
-async function writeStream(
-    stream: Writable,
-    type:
-        | typeof RecordType.STDOUT
-        | typeof RecordType.STDIN
-        | typeof RecordType.STDERR
-        | typeof RecordType.DATA,
-    requestId: number,
-    data: BufferLike | null,
-    encoding: BufferEncoding
-) {
-    let buffer = toBuffer(data, encoding);
-    do {
-        const chunk = buffer.subarray(0, 0xffff);
-        buffer = buffer.subarray(0xffff);
-        await writeAsync(stream, {
-            type,
-            requestId,
-            data: chunk
-        });
-    } while (buffer.length > 0);
-}
-
 type IncomingConnectionEventMap = {
     request: (request: IncomingRequest) => void;
     error: (error: Error) => void;
@@ -91,7 +80,7 @@ type IncomingConnectionEventMap = {
 export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap> {
     #stream: Duplex;
     #requests: Map<number, IncomingRequest> = new Map();
-    #pendingRequests: Map<number, BeginRequestRecord> = new Map();
+    #pendingRequests: Map<number, BeginRequestRecord & { params?: Params }> = new Map();
     #config: Config;
 
     #closeConnection = false;
@@ -155,6 +144,13 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                         return;
                     }
                     const begin = this.#pendingRequests.get(record.requestId)!;
+                    if (Object.keys(record.params).length > 0) {
+                        begin.params = {
+                            ...(begin.params ?? {}),
+                            ...record.params
+                        };
+                        return;
+                    }
                     this.#pendingRequests.delete(record.requestId);
                     const stdin = new DummyReadable();
                     const data = new DummyReadable();
@@ -166,7 +162,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                         data,
                         stdout,
                         stderr,
-                        params: record.params
+                        params: (begin.params ?? {}) as Params
                     });
                     this.#requests.set(record.requestId, request);
                     request.once('end', (status: number = 0) => {
@@ -272,12 +268,6 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         super();
         this.#stream = stream;
 
-        this.#stream.write({
-            type: RecordType.GET_VALUES,
-            requestId: 0,
-            keys: ['FCGI_MAX_CONNS', 'FCGI_MAX_REQS', 'FCGI_MPXS_CONNS']
-        });
-
         this.#stream.on('data', (record) => {
             this.#handleRecord.call(this, record);
         });
@@ -299,8 +289,6 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         if (this.#requests.size >= 0xffff) {
             throw new Error('Too many requests');
         }
-        const downStreamConfig = await this.getValues();
-        const shouldKeepAlive = keepAlive && downStreamConfig.FCGI_MPXS_CONNS;
         let requestId: number;
         do {
             requestId = (this.#accId++ % 0xffff) + 1;
@@ -313,17 +301,25 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
             stderr: new DummyReadable()
         });
         this.#requests.set(requestId, request);
-        await writeAsync(this.#stream, {
-            type: RecordType.BEGIN_REQUEST,
-            role,
-            requestId,
-            flags: shouldKeepAlive ? Flags.KEEP_CONN : 0
-        });
-        await writeAsync(this.#stream, {
-            type: RecordType.PARAMS,
-            requestId,
-            params
-        });
+        const records: FastCGIRecord[] = [
+            {
+                type: RecordType.BEGIN_REQUEST,
+                role,
+                requestId,
+                flags: keepAlive ? Flags.KEEP_CONN : 0
+            },
+            {
+                type: RecordType.PARAMS,
+                requestId,
+                params
+            },
+            {
+                type: RecordType.PARAMS,
+                requestId,
+                params: {} as any
+            }
+        ];
+        await writeAsync(this.#stream, records);
         request.once('abort', () => {
             this.#stream.write({
                 type: RecordType.ABORT_REQUEST,
@@ -331,14 +327,14 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
             });
             this.#requests.delete(requestId);
             destroyRequest(request);
-            if (!shouldKeepAlive) {
+            if (!keepAlive) {
                 this.close();
             }
         });
         request.once('end', () => {
             this.#requests.delete(requestId);
             destroyRequest(request);
-            if (!shouldKeepAlive) {
+            if (!keepAlive) {
                 this.close();
             }
         });
@@ -398,9 +394,9 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
                         return;
                     }
                     const request = this.#requests.get(record.requestId)!;
-                    request.emit('end', record.appStatus);
                     this.#requests.delete(record.requestId);
                     destroyRequest(request);
+                    request.emit('end', record.appStatus);
                 }
                 break;
         }
