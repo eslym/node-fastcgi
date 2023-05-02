@@ -12,6 +12,8 @@ import {
 } from './protocol';
 import { OutgoingRequest, IncomingRequest } from './request';
 import { noop, returnThis } from './utils/noop';
+import { Decoder } from './decoder';
+import { Encoder } from './encoder';
 
 function writeAsync(stream: Writable, record: FastCGIRecord | FastCGIRecord[]): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -77,11 +79,16 @@ type IncomingConnectionEventMap = {
     close: () => void;
 };
 
+export interface IncomingConnectionConfig {
+    fastcgi?: Config;
+    paddingFit?: number;
+}
+
 export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap> {
     #stream: Duplex;
     #requests: Map<number, IncomingRequest> = new Map();
     #pendingRequests: Map<number, BeginRequestRecord & { params?: Params }> = new Map();
-    #config: Config;
+    #config: IncomingConnectionConfig;
 
     #closeConnection = false;
 
@@ -93,9 +100,19 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
         return this.#handleRecord === noop;
     }
 
-    constructor(stream: Duplex, config: Config = {}) {
+    constructor(stream: Duplex, config: IncomingConnectionConfig = {}) {
         super();
-        this.#stream = stream;
+
+        const io = {
+            readable: new Decoder(),
+            writable: new Encoder(config.paddingFit)
+        };
+
+        stream.pipe(io.readable);
+        io.writable.pipe(stream);
+
+        this.#stream = Duplex.from(io);
+
         this.#config = config;
         this.#stream.on('data', (record: FastCGIRecord) => {
             this.#handleRecord.call(this, record);
@@ -218,9 +235,10 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
             case RecordType.GET_VALUES:
                 {
                     const values: { [key: string]: string } = {};
-                    for (const key of record.keys) {
-                        if (key in this.#config) {
-                            let val = (this.#config as any)[key];
+                    const entries = Object.entries(this.#config.fastcgi ?? {});
+                    for (let i = 0; i < entries.length; i++) {
+                        const [key, val] = entries[i];
+                        if (record.keys.includes(key) && typeof val !== 'undefined') {
                             values[key] = typeof val === 'boolean' ? (val ? '1' : '0') : `${val}`;
                         }
                     }
@@ -264,9 +282,18 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         return this.#handleRecord === noop;
     }
 
-    constructor(stream: Duplex) {
+    constructor(stream: Duplex, paddingFit?: number) {
         super();
-        this.#stream = stream;
+
+        const io = {
+            readable: new Decoder(),
+            writable: new Encoder(paddingFit)
+        };
+
+        stream.pipe(io.readable);
+        io.writable.pipe(stream);
+
+        this.#stream = Duplex.from(io);
 
         this.#stream.on('data', (record) => {
             this.#handleRecord.call(this, record);
@@ -277,6 +304,11 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         if (this.#config) {
             return this.#config;
         }
+        this.#stream.write({
+            type: RecordType.GET_VALUES,
+            requestId: 0,
+            keys: ['FCGI_MAX_CONNS', 'FCGI_MAX_REQS', 'FCGI_MPXS_CONNS']
+        });
         return new Promise((resolve) => {
             this.#pendingGetValues.add(resolve);
         });

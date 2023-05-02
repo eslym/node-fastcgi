@@ -107,3 +107,58 @@ server.on('error', (err) => {
 
 server.listen(9000);
 ```
+
+### Use as a client
+
+```typescript
+import { OutgoingConnection } from '@eslym/fastcgi';
+import { connect } from 'net';
+
+const socket = connect(9000);
+
+socket.on('connect', async () => {
+    const conn = new OutgoingConnection(socket);
+
+    const req = await conn.beginRequest(
+        {
+            QUERY_STRING: '',
+            REQUEST_METHOD: 'GET',
+            CONTENT_TYPE: '',
+            CONTENT_LENGTH: '0',
+            SCRIPT_FILENAME: '/var/www/html/index.php',
+            SCRIPT_NAME: '/index.php',
+            REQUEST_URI: '/',
+            DOCUMENT_URI: '/index.php',
+            DOCUMENT_ROOT: '/var/www/html',
+            PATH_INFO: '',
+            PATH_TRANSLATED: '',
+            SERVER_PROTOCOL: 'HTTP/1.1',
+            GATEWAY_INTERFACE: 'CGI/1.1',
+            SERVER_SOFTWARE: 'nodejs',
+            REMOTE_ADDR: '127.0.0.1',
+            REMOTE_PORT: '12345',
+            SERVER_ADDR: '127.0.0.1',
+            SERVER_PORT: '80',
+            SERVER_NAME: 'localhost',
+            HTTP_HOST: 'www.example.com',
+            HTTP_USER_AGENT: 'nodejs',
+            HTTP_ACCEPT: '*/*',
+            HTTP_ACCEPT_LANGUAGE: 'en-US'
+        },
+        {
+            keepAlive: true
+        }
+    );
+
+    let buffer = [];
+
+    req.stdout.on('data', (chunk) => {
+        buffer.push(chunk);
+    });
+
+    req.on('end', (status) => {
+        console.log(Buffer.concat(buffer).toString());
+        console.log(`Request end with status ${status}`);
+    });
+});
+```

@@ -40,10 +40,10 @@ function encodeRecord(record: FastCGIRecord, chunkSize: number, encoding: Buffer
         } while (buffer.length);
         return Buffer.concat(buffers);
     }
-    return Buffer.concat(buildRecord(record, chunkSize, encodeRecordBody(record)));
+    return Buffer.concat(buildRecord(record, chunkSize, encodeRecordBody(record, encoding)));
 }
 
-function encodeRecordBody(record: FastCGIRecord): Buffer {
+function encodeRecordBody(record: FastCGIRecord, encoding: BufferEncoding): Buffer {
     let buffer: Buffer;
     let arr: Buffer[] = [];
     switch (record.type) {
@@ -64,13 +64,13 @@ function encodeRecordBody(record: FastCGIRecord): Buffer {
             for (let i = 0; i < entries.length; i++) {
                 const [name, value] = entries[i];
                 if (value === undefined) continue;
-                arr.push(...encodeKeyValuePair(name, value));
+                arr.push(...encodeKeyValuePair(name, value, encoding));
             }
             return Buffer.concat(arr);
         }
         case RecordType.GET_VALUES:
             for (let i = 0; i < record.keys.length; i++) {
-                arr.push(...encodeKeyValuePair(record.keys[i], ''));
+                arr.push(...encodeKeyValuePair(record.keys[i], '', encoding));
             }
             return Buffer.concat(arr);
         case RecordType.GET_VALUES_RESULT: {
@@ -78,7 +78,7 @@ function encodeRecordBody(record: FastCGIRecord): Buffer {
             for (let i = 0; i < entries.length; i++) {
                 const [name, value] = entries[i];
                 if (value === undefined) continue;
-                arr.push(...encodeKeyValuePair(name, value));
+                arr.push(...encodeKeyValuePair(name, value, encoding));
             }
             return Buffer.concat(arr);
         }
@@ -91,9 +91,9 @@ function encodeRecordBody(record: FastCGIRecord): Buffer {
     }
 }
 
-function encodeKeyValuePair(name: string, value: string): Buffer[] {
-    const nameBuffer = Buffer.from(name);
-    const valueBuffer = Buffer.from(value);
+function encodeKeyValuePair(name: string, value: string, encoding: BufferEncoding): Buffer[] {
+    const nameBuffer = Buffer.from(name, encoding);
+    const valueBuffer = Buffer.from(value, encoding);
     let nameLenBuffer: Buffer;
     if (nameBuffer.length < 0x80) {
         nameLenBuffer = Buffer.alloc(1);

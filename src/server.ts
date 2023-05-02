@@ -16,7 +16,7 @@ type ServerEventMap = {
 };
 
 interface ServerConfig {
-    paddingFitToChunk?: number;
+    paddingFit?: number;
     server?: TCPServer;
     fastcgi?: Config;
 }
@@ -55,15 +55,7 @@ export class Server extends EventEmitter<ServerEventMap> {
         this.#config.FCGI_MPXS_CONNS = config.fastcgi?.FCGI_MPXS_CONNS ?? true;
         this.#server = config.server ?? new TCPServer();
         this.#server.on('connection', (socket) => {
-            const encoder = new Encoder(config.paddingFitToChunk);
-            const decoder = new Decoder();
-            socket.pipe(decoder);
-            encoder.pipe(socket);
-            const stream = Duplex.from({
-                readable: decoder,
-                writable: encoder
-            });
-            const connection = new IncomingConnection(stream);
+            const connection = new IncomingConnection(socket, config);
             this.#connections.add(socket);
             socket.on('close', () => {
                 this.#connections.delete(socket);

@@ -1,6 +1,11 @@
 {
     "name": "@eslym/fastcgi",
-    "version": "1.0.2",
+    "version": "1.1.0",
+    "description": "FastCGI implementation for Node.js",
+    "keywords": [
+        "fastcgi",
+        "protocol"
+    ],
     "main": "dist/index.js",
     "type": "module",
     "author": "0nepeop1e",

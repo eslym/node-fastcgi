@@ -84,8 +84,12 @@ export function handleHttp(handler: HttpHandler) {
         socket.on('end', () => request.emit('end'));
         socket.on('error', (err) => request.destroy(err));
 
-        const url = getURL(req);
-        request.url = url.pathname + url.search;
+        const qs =
+            req.params.QUERY_STRING && !req.params.QUERY_STRING.startsWith('?')
+                ? `?${req.params.QUERY_STRING}`
+                : req.params.QUERY_STRING ?? '';
+
+        request.url = req.params.REQUEST_URI + qs;
         request.method = req.params.REQUEST_METHOD;
 
         const response = new ServerResponse(request);
