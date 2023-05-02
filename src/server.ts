@@ -64,7 +64,6 @@ export class Server extends EventEmitter<ServerEventMap> {
                 writable: encoder
             });
             const connection = new IncomingConnection(stream);
-            this.emit('connection', connection);
             this.#connections.add(socket);
             socket.on('close', () => {
                 this.#connections.delete(socket);
@@ -74,6 +73,8 @@ export class Server extends EventEmitter<ServerEventMap> {
                 this.#connections.delete(socket);
                 socket.destroy();
             });
+
+            this.emit('connection', connection);
         });
 
         this.#server.on('error', (error) => {
@@ -93,11 +94,11 @@ export class Server extends EventEmitter<ServerEventMap> {
                     request.end(0);
                     return;
                 }
-                this.emit('request', request);
                 this.#requests.add(request);
                 request.on('end', () => {
                     this.#requests.delete(request);
                 });
+                this.emit('request', request);
             });
             connection.on('error', (error) => {
                 this.emit('error', error);

@@ -98,7 +98,7 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
         this.#ended = true;
         this.#stdout.end();
         this.#stderr.end();
-        process.nextTick(() => this.emit('end', status));
+        this.emit('end', status);
         return this;
     }
 }
@@ -163,8 +163,8 @@ export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
 
     abort() {
         this.abort = returnThis;
-        this.emit('abort');
         this.#stdin.end();
+        this.emit('abort');
         return this;
     }
 
