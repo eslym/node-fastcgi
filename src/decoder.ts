@@ -1,5 +1,5 @@
-import { isArrayBufferView } from 'util/types';
-import { Transform, TransformCallback } from 'stream';
+import { isArrayBufferView } from 'node:util/types';
+import { Transform, TransformCallback } from 'node:stream';
 import {
     RecordHeader,
     FastCGIRecord,

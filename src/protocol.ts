@@ -1,3 +1,5 @@
+import { BufferLike } from './utils/buffer';
+
 export const Protocol = Object.freeze({
     VERSION: 1,
     HEADER_LEN: 8,
@@ -50,8 +52,6 @@ export interface Config {
     FCGI_MAX_REQS?: number;
     FCGI_MPXS_CONNS?: boolean;
 }
-
-export type BufferLike = ArrayBufferView | string;
 
 export type Params = {
     SERVER_NAME: string;
@@ -112,12 +112,11 @@ export interface ParamsRecord extends BaseRecord {
 }
 
 export interface StreamRecord extends BaseRecord {
-    type: typeof RecordType.STDIN | typeof RecordType.STDOUT | typeof RecordType.STDERR;
-    data: BufferLike | null;
-}
-
-export interface DataRecord extends BaseRecord {
-    type: typeof RecordType.DATA;
+    type:
+        | typeof RecordType.STDIN
+        | typeof RecordType.STDOUT
+        | typeof RecordType.STDERR
+        | typeof RecordType.DATA;
     data: BufferLike | null;
 }
 
@@ -142,7 +141,6 @@ export type FastCGIRecord =
     | EndRequestRecord
     | ParamsRecord
     | StreamRecord
-    | DataRecord
     | GetValuesRecord
     | GetValuesResultRecord
     | UnknownTypeRecord;

@@ -1,12 +1,12 @@
 import { IncomingConnection } from './connection';
 import { IncomingRequest } from './request';
-import { Socket, Server as TCPServer } from 'net';
+import { Socket, Server as TCPServer } from 'node:net';
 import { EventEmitter } from './utils/emitter';
 import { Config } from './protocol';
-import { Abortable } from 'events';
+import { Abortable } from 'node:events';
 import { Decoder } from './decoder';
 import { Encoder } from './encoder';
-import { Duplex } from 'stream';
+import { Duplex } from 'node:stream';
 
 type ServerEventMap = {
     connection: (connection: IncomingConnection) => void;

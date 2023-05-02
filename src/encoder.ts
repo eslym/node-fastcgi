@@ -1,6 +1,6 @@
-import { Transform, TransformCallback } from 'stream';
+import { Duplex, Transform, TransformCallback } from 'node:stream';
 import { Protocol, FastCGIRecord, RecordType, StreamRecord } from './protocol';
-import assert from 'assert';
+import assert from 'node:assert';
 import { toBuffer } from './utils/buffer';
 
 const DEFAULT_CHUNK_SIZE = 8;

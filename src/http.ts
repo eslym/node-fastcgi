@@ -1,10 +1,9 @@
-import { Duplex } from 'stream';
+import { Duplex } from 'node:stream';
 import { Params, Role } from './protocol';
-import { Socket, isIPv4 } from 'net';
+import { Socket, isIPv4 } from 'node:net';
 import { IncomingRequest } from './request';
-import { IncomingMessage, ServerResponse } from 'http';
-
-const noop = (() => {}) as (...args: any[]) => any;
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { noop } from './utils/noop';
 
 function defineGetter<T, K extends keyof T>(object: T, property: K, getter: () => T[K]) {
     Object.defineProperty(object, property, { get: getter });

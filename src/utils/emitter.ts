@@ -1,4 +1,4 @@
-import { EventEmitter as ee } from 'events';
+import { EventEmitter as ee } from 'node:events';
 
 export type EventMap = {
     [key: string]: (...args: any[]) => void;
@@ -43,3 +43,4 @@ declare class TypedEventEmitter<Events extends EventMap> {
 }
 
 export const EventEmitter = ee as typeof TypedEventEmitter;
+export type EventEmitter<T extends EventMap> = TypedEventEmitter<T>;

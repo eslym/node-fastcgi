@@ -1,9 +1,8 @@
-import { Duplex, Readable, Writable } from 'stream';
+import { Duplex, Readable, Writable } from 'node:stream';
 import { EventEmitter } from './utils/emitter';
 import {
     Role,
     Config,
-    BufferLike,
     Flags,
     Params,
     Status,
@@ -12,8 +11,8 @@ import {
     BeginRequestRecord
 } from './protocol';
 import { OutgoingRequest, IncomingRequest } from './request';
-import { toBuffer } from './utils/buffer';
-import { connect } from 'net';
+import { BufferLike, toBuffer } from './utils/buffer';
+import { noop, returnThis } from './utils/noop';
 
 function writeAsync(stream: Writable, record: FastCGIRecord): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -26,8 +25,6 @@ function writeAsync(stream: Writable, record: FastCGIRecord): Promise<void> {
         });
     });
 }
-
-const noop = (() => {}) as (...any: any[]) => any;
 
 class DummyReadable extends Readable {
     _read() {}
@@ -125,17 +122,15 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
     }
 
     close() {
-        if (this.closed) {
-            return;
-        }
         this.#handleRecord = noop;
-        this.close = noop;
+        this.close = returnThis;
         for (const request of this.#requests.values()) {
             destroyRequest(request);
         }
         this.#requests.clear();
         this.#pendingRequests.clear();
         this.emit('close');
+        return this;
     }
 
     #handleRecord = function (this: IncomingConnection, record: FastCGIRecord) {
@@ -213,7 +208,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                         return;
                     }
                     const request = this.#requests.get(record.requestId)!;
-                    request.emit('abort');
+                    request.abort();
                     destroyRequest(request);
                     this.#requests.delete(record.requestId);
                     this.#stream.write({
@@ -301,9 +296,15 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         params: Params,
         { role = Role.RESPONDER, keepAlive = true }: BeginRequestOptions = {}
     ): Promise<OutgoingRequest> {
+        if (this.#requests.size >= 0xffff) {
+            throw new Error('Too many requests');
+        }
         const downStreamConfig = await this.getValues();
         const shouldKeepAlive = keepAlive && downStreamConfig.FCGI_MPXS_CONNS;
-        const requestId = (this.#accId++ % 0xffff) + 1;
+        let requestId: number;
+        do {
+            requestId = (this.#accId++ % 0xffff) + 1;
+        } while (this.#requests.has(requestId));
         const request = new OutgoingRequest({
             params,
             stdin: createWriteStream(this.#stream, RecordType.STDIN),
@@ -345,15 +346,14 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
     }
 
     close() {
-        if (this.closed) {
-            return;
-        }
         this.#handleRecord = noop;
+        this.close = returnThis;
         for (const request of this.#requests.values()) {
             request.abort();
             destroyRequest(request);
         }
         this.emit('close');
+        return this;
     }
 
     #handleRecord = function (this: OutgoingConnection, record: FastCGIRecord) {

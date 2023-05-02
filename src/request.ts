@@ -1,5 +1,6 @@
 import { EventEmitter } from './utils/emitter';
 import { Params, Role } from './protocol';
+import { returnThis } from './utils/noop';
 
 type IncomingRequestEvent = {
     error: (error: Error) => void;
@@ -13,6 +14,10 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
     #data: NodeJS.ReadableStream;
     #stdout: NodeJS.WritableStream;
     #stderr: NodeJS.WritableStream;
+    #abortController: AbortController = new AbortController();
+
+    #ended: boolean = false;
+    #aborted: boolean = false;
 
     #params: Params;
 
@@ -40,6 +45,18 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
         return this.#params;
     }
 
+    get ended(): boolean {
+        return this.#ended;
+    }
+
+    get aborted(): boolean {
+        return this.#aborted;
+    }
+
+    get abortedSignal(): AbortSignal {
+        return this.#abortController.signal;
+    }
+
     constructor({
         role,
         stdin,
@@ -64,10 +81,25 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
         this.#params = params;
     }
 
+    abort(reason?: string) {
+        this.abort = returnThis;
+        this.end = returnThis;
+        this.#aborted = true;
+        process.nextTick(() => {
+            this.#abortController.abort(reason);
+            this.emit('abort');
+        });
+        return this.end(1);
+    }
+
     end(status?: number) {
+        this.end = returnThis;
+        this.abort = returnThis;
+        this.#ended = true;
         this.#stdout.end();
         this.#stderr.end();
-        this.emit('end', status);
+        process.nextTick(() => this.emit('end', status));
+        return this;
     }
 }
 
@@ -104,6 +136,10 @@ export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
         return this.#stderr;
     }
 
+    get aborted(): boolean {
+        return this.abort === returnThis;
+    }
+
     constructor({
         params,
         stdin,
@@ -126,8 +162,10 @@ export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
     }
 
     abort() {
+        this.abort = returnThis;
         this.emit('abort');
         this.#stdin.end();
+        return this;
     }
 
     write(chunk: Buffer | string) {

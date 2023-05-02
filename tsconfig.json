@@ -6,7 +6,8 @@
         "strict": true,
         "esModuleInterop": true,
         "declaration": true,
-        "forceConsistentCasingInFileNames": true
+        "forceConsistentCasingInFileNames": true,
+        "declarationDir": "dist/types"
     },
     "include": ["src/**/*"]
 }
