@@ -1,6 +1,8 @@
 import { EventEmitter } from './utils/emitter';
 import { Params, Role } from './protocol';
 import { returnThis } from './utils/noop';
+import { mockRequest } from './utils/http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 type IncomingRequestEvent = {
     error: (error: Error) => void;
@@ -57,6 +59,14 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
         return this.#abortController.signal;
     }
 
+    get incomingMessage(): IncomingMessage {
+        return this.#mockRequest().request;
+    }
+
+    get serverResponse(): ServerResponse {
+        return this.#mockRequest().response;
+    }
+
     constructor({
         role,
         stdin,
@@ -101,6 +111,12 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
         this.emit('end', status);
         return this;
     }
+
+    #mockRequest = () => {
+        const http = mockRequest(this);
+        this.#mockRequest = () => http;
+        return http;
+    };
 }
 
 type OutgoingRequestEvent = {

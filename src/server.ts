@@ -4,9 +4,6 @@ import { Socket, Server as TCPServer } from 'node:net';
 import { EventEmitter } from './utils/emitter';
 import { Config } from './protocol';
 import { Abortable } from 'node:events';
-import { Decoder } from './decoder';
-import { Encoder } from './encoder';
-import { Duplex } from 'node:stream';
 
 type ServerEventMap = {
     connection: (connection: IncomingConnection) => void;
