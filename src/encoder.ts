@@ -100,7 +100,7 @@ function encodeKeyValuePair(name: string, value: string, encoding: BufferEncodin
         nameLenBuffer.writeUInt8(nameBuffer.length, 0);
     } else {
         nameLenBuffer = Buffer.alloc(4);
-        nameLenBuffer.writeUInt32BE(nameBuffer.length | 0x80000000, 0);
+        nameLenBuffer.writeInt32BE(nameBuffer.length | 0x80000000, 0);
     }
     let valueLenBuffer: Buffer;
     if (valueBuffer.length < 0x80) {
@@ -108,7 +108,7 @@ function encodeKeyValuePair(name: string, value: string, encoding: BufferEncodin
         valueLenBuffer.writeUInt8(valueBuffer.length, 0);
     } else {
         valueLenBuffer = Buffer.alloc(4);
-        valueLenBuffer.writeUInt32BE(valueBuffer.length | 0x80000000, 0);
+        valueLenBuffer.writeInt32BE(valueBuffer.length | 0x80000000, 0);
     }
     return [nameLenBuffer, valueLenBuffer, nameBuffer, valueBuffer];
 }

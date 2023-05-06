@@ -33,6 +33,7 @@ class DummyReadable extends Readable {
 
 function createWriteStream(
     stream: Writable,
+    requestId: number,
     type:
         | typeof RecordType.STDOUT
         | typeof RecordType.STDIN
@@ -44,6 +45,7 @@ function createWriteStream(
             stream.write(
                 {
                     type,
+                    requestId,
                     data: chunk
                 },
                 encoding,
@@ -54,6 +56,7 @@ function createWriteStream(
             stream.write(
                 {
                     type,
+                    requestId,
                     data: null
                 },
                 callback
@@ -171,8 +174,16 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                     this.#pendingRequests.delete(record.requestId);
                     const stdin = new DummyReadable();
                     const data = new DummyReadable();
-                    const stdout = createWriteStream(this.#stream, RecordType.STDOUT);
-                    const stderr = createWriteStream(this.#stream, RecordType.STDERR);
+                    const stdout = createWriteStream(
+                        this.#stream,
+                        record.requestId,
+                        RecordType.STDOUT
+                    );
+                    const stderr = createWriteStream(
+                        this.#stream,
+                        record.requestId,
+                        RecordType.STDERR
+                    );
                     const request = new IncomingRequest({
                         role: begin.role,
                         stdin,
@@ -327,8 +338,8 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         } while (this.#requests.has(requestId));
         const request = new OutgoingRequest({
             params,
-            stdin: createWriteStream(this.#stream, RecordType.STDIN),
-            data: createWriteStream(this.#stream, RecordType.DATA),
+            stdin: createWriteStream(this.#stream, requestId, RecordType.STDIN),
+            data: createWriteStream(this.#stream, requestId, RecordType.DATA),
             stdout: new DummyReadable(),
             stderr: new DummyReadable()
         });

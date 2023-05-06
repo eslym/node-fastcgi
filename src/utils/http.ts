@@ -66,10 +66,24 @@ export function mockRequest(req: IncomingRequest) {
         request.headers['content-length'] = req.params.CONTENT_LENGTH;
     }
 
-    // somehow if use push(), the write for the response will broke
-    socket.on('data', (chunk) => request.emit('data', chunk));
-    socket.on('end', () => request.emit('end'));
-    socket.on('error', (err) => request.destroy(err));
+    let contentLength = parseInt(`${req.params.CONTENT_LENGTH}`);
+
+    if (!isNaN(contentLength) && contentLength > 0) {
+        let bytesRead = 0;
+        const read = (chunk: Buffer) => {
+            bytesRead += chunk.length;
+            request.push(chunk);
+            if (bytesRead >= contentLength) {
+                request.push(null);
+                req.stdin.off('data', read);
+            }
+        };
+        req.stdin.on('data', read);
+        req.stdin.once('end', () => {
+            request.push(null);
+            req.stdin.off('data', read);
+        });
+    }
 
     const qs =
         req.params.QUERY_STRING && !req.params.QUERY_STRING.startsWith('?')
