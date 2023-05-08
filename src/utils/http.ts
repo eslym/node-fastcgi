@@ -9,13 +9,20 @@ function defineGetter<T, K extends keyof T>(object: T, property: K, getter: () =
     Object.defineProperty(object, property, { get: getter });
 }
 
+const storeHeader = (ServerResponse as any).prototype._storeHeader as Function;
+
 function decorateServerResponse(response: ServerResponse) {
     // not an always guaranteed working trick
     // hooking into the private _storeHeader method
     // to replace the status line with the fastcgi status
-    const storeHeader = (response as any)._storeHeader;
     (response as any)._storeHeader = function (this: ServerResponse, _: string, headers: any) {
         return storeHeader.call(this, `Status: ${this.statusCode}\r\n`, headers);
+    };
+
+    (response as any)._onPendingData = function (this: ServerResponse, size: number) {
+        if (this.writableNeedDrain) {
+            this.emit('drain');
+        }
     };
 }
 
@@ -48,6 +55,7 @@ export function mockSocket(
     defineGetter(duplex, 'setNoDelay', () => noop);
     defineGetter(duplex, 'ref', () => () => duplex);
     defineGetter(duplex, 'unref', () => () => duplex);
+    defineGetter(duplex, 'encrypted' as any, () => params.HTTPS === 'on');
 
     return duplex;
 }
@@ -93,11 +101,28 @@ export function mockRequest(req: IncomingRequest) {
     request.url = req.params.REQUEST_URI + qs;
     request.method = req.params.REQUEST_METHOD;
 
+    if (req.params.SERVER_PROTOCOL) {
+        const [major, minor] = req.params.SERVER_PROTOCOL.replace('HTTP/', '').split('.');
+        request.httpVersionMajor = Number(major);
+        request.httpVersionMinor = Number(minor);
+        request.httpVersion = `HTTP/${major}.${minor}`;
+    }
+
     const response = new ServerResponse(request);
+
+    response.assignSocket(socket);
 
     decorateServerResponse(response);
 
-    response.assignSocket(socket);
+    const onDrain = () => {
+        (response as any)._onPendingData(0);
+    };
+
+    socket.on('drain', onDrain);
+
+    socket.on('close', () => {
+        socket.off('drain', onDrain);
+    });
 
     response.on('finish', () => {
         req.end(0);

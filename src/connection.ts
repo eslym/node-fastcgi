@@ -1,4 +1,4 @@
-import { Duplex, Readable, Transform, TransformCallback, Writable, pipeline } from 'node:stream';
+import { Duplex, Readable, Transform, TransformCallback, Writable } from 'node:stream';
 import { EventEmitter } from './utils/emitter';
 import {
     Role,
