@@ -1,4 +1,4 @@
-import { Duplex, Readable, Writable } from 'node:stream';
+import { Duplex, Readable, Transform, TransformCallback, Writable, pipeline } from 'node:stream';
 import { EventEmitter } from './utils/emitter';
 import {
     Role,
@@ -14,21 +14,38 @@ import { OutgoingRequest, IncomingRequest } from './request';
 import { noop, returnThis } from './utils/noop';
 import { Decoder } from './decoder';
 import { Encoder } from './encoder';
-
-function writeAsync(stream: Writable, record: FastCGIRecord | FastCGIRecord[]): Promise<void> {
-    return new Promise((resolve, reject) => {
-        stream.write(record, (error) => {
-            if (error) {
-                reject(error);
-            } else {
-                resolve();
-            }
-        });
-    });
-}
+import { toBuffer } from './utils/buffer';
 
 class DummyReadable extends Readable {
     _read() {}
+}
+
+class BufferToRecord extends Transform {
+    #requestId: number;
+    #type: RecordType;
+    constructor(requestId: number, type: RecordType) {
+        super({
+            readableObjectMode: true
+        });
+        this.#requestId = requestId;
+        this.#type = type;
+    }
+
+    _transform(chunk: Buffer, encoding: BufferEncoding, callback: TransformCallback) {
+        callback(null, {
+            type: this.#type,
+            requestId: this.#requestId,
+            data: toBuffer(chunk, encoding)
+        });
+    }
+
+    _flush(callback: TransformCallback) {
+        callback(null, {
+            type: this.#type,
+            requestId: this.#requestId,
+            data: toBuffer(Buffer.alloc(0), 'binary')
+        });
+    }
 }
 
 function createWriteStream(
@@ -40,40 +57,18 @@ function createWriteStream(
         | typeof RecordType.STDERR
         | typeof RecordType.DATA
 ) {
-    return new Writable({
-        write(chunk, encoding, callback) {
-            stream.write(
-                {
-                    type,
-                    requestId,
-                    data: chunk
-                },
-                encoding,
-                callback
-            );
-        },
-        final(callback) {
-            stream.write(
-                {
-                    type,
-                    requestId,
-                    data: null
-                },
-                callback
-            );
-        }
-    });
+    const bufferToRecord = new BufferToRecord(requestId, type);
+    bufferToRecord.pipe(stream, { end: false });
+    return bufferToRecord;
 }
 
-type destroyable = {
-    destroy(): void;
-};
+const cleanup = new WeakMap<object, () => void>();
 
 function destroyRequest(request: IncomingRequest | OutgoingRequest) {
-    (request.stdin as any as destroyable).destroy();
-    (request.data as any as destroyable).destroy();
-    (request.stdout as any as destroyable).destroy();
-    (request.stderr as any as destroyable).destroy();
+    if (cleanup.has(request)) {
+        process.nextTick(cleanup.get(request)!);
+        cleanup.delete(request);
+    }
 }
 
 type IncomingConnectionEventMap = {
@@ -111,8 +106,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
             writable: new Encoder(config.paddingFit)
         };
 
-        stream.pipe(io.readable);
-        io.writable.pipe(stream);
+        io.writable.pipe(stream).pipe(io.readable);
 
         this.#stream = Duplex.from(io);
 
@@ -149,13 +143,21 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                     this.#requests.has(record.requestId) ||
                     this.#pendingRequests.has(record.requestId) ||
                     record.requestId <= 0 ||
-                    record.requestId > 0xffff ||
-                    record.role !== Role.RESPONDER ||
-                    this.#closeConnection
+                    record.requestId > 0xffff
                 ) {
                     return;
                 }
-                this.#closeConnection = !(record.flags & Flags.KEEP_CONN);
+                if (this.#closeConnection || !this.#config.fastcgi?.FCGI_MPXS_CONNS) {
+                    this.#stream.write({
+                        type: RecordType.END_REQUEST,
+                        requestId: record.requestId,
+                        appStatus: 0,
+                        protocolStatus: Status.CANT_MPX_CONN
+                    });
+                    return;
+                }
+                this.#closeConnection =
+                    !(record.flags & Flags.KEEP_CONN) || !this.#config.fastcgi?.FCGI_MPXS_CONNS;
                 this.#pendingRequests.set(record.requestId, record);
                 break;
             case RecordType.PARAMS:
@@ -192,20 +194,29 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                         stderr,
                         params: (begin.params ?? {}) as Params
                     });
-                    this.#requests.set(record.requestId, request);
-                    request.once('end', (status: number = 0) => {
-                        this.#stream.write({
-                            type: RecordType.END_REQUEST,
-                            requestId: record.requestId,
-                            appStatus: status,
-                            protocolStatus: Status.REQUEST_COMPLETE
-                        });
-                        destroyRequest(request);
-                        this.#requests.delete(record.requestId);
-                        if (this.#closeConnection) {
-                            this.close();
-                        }
+                    cleanup.set(request, () => {
+                        if (!stdin.readableEnded) stdin.push(null);
+                        if (!data.readableEnded) data.push(null);
+                        // if (!stdout.closed) stdout.end();
+                        // if (!stderr.closed) stderr.end();
                     });
+                    this.#requests.set(record.requestId, request);
+                    request.once(
+                        'end',
+                        (status: number = 0, protocolStatus: Status = Status.REQUEST_COMPLETE) => {
+                            this.#stream.write({
+                                type: RecordType.END_REQUEST,
+                                requestId: record.requestId,
+                                appStatus: status,
+                                protocolStatus
+                            });
+                            destroyRequest(request);
+                            this.#requests.delete(record.requestId);
+                            if (this.#closeConnection) {
+                                this.close();
+                            }
+                        }
+                    );
                     this.emit('request', request);
                 }
                 break;
@@ -278,6 +289,7 @@ interface BeginRequestOptions {
 export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap> {
     #stream: Duplex;
     #config?: Config;
+    #encoder: Encoder;
 
     #requests: Map<number, OutgoingRequest> = new Map();
 
@@ -298,11 +310,10 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
 
         const io = {
             readable: new Decoder(),
-            writable: new Encoder(paddingFit)
+            writable: (this.#encoder = new Encoder(paddingFit))
         };
 
-        stream.pipe(io.readable);
-        io.writable.pipe(stream);
+        io.writable.pipe(stream).pipe(io.readable);
 
         this.#stream = Duplex.from(io);
 
@@ -336,12 +347,17 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         do {
             requestId = (this.#accId++ % 0xffff) + 1;
         } while (this.#requests.has(requestId));
-        const request = new OutgoingRequest({
+        const opts = {
             params,
             stdin: createWriteStream(this.#stream, requestId, RecordType.STDIN),
             data: createWriteStream(this.#stream, requestId, RecordType.DATA),
             stdout: new DummyReadable(),
             stderr: new DummyReadable()
+        };
+        const request = new OutgoingRequest(opts);
+        cleanup.set(request, () => {
+            if (!opts.stdout.readableEnded) opts.stdout.push(null);
+            if (!opts.stderr.readableEnded) opts.stderr.push(null);
         });
         this.#requests.set(requestId, request);
         const records: FastCGIRecord[] = [
@@ -362,7 +378,7 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
                 params: {} as any
             }
         ];
-        await writeAsync(this.#stream, records);
+        this.#stream.write(records);
         request.once('abort', () => {
             this.#stream.write({
                 type: RecordType.ABORT_REQUEST,
@@ -439,7 +455,7 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
                     const request = this.#requests.get(record.requestId)!;
                     this.#requests.delete(record.requestId);
                     destroyRequest(request);
-                    request.emit('end', record.appStatus);
+                    request.emit('end', record.appStatus, record.protocolStatus);
                 }
                 break;
         }

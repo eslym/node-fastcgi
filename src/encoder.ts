@@ -5,6 +5,8 @@ import { toBuffer } from './utils/buffer';
 
 const DEFAULT_CHUNK_SIZE = 8;
 
+const MAX_WRITE_SIZE = Protocol.MAX_CONTENT_SIZE;
+
 const streamRecordTypes = new Set<RecordType>([
     RecordType.STDIN,
     RecordType.STDOUT,
@@ -34,8 +36,8 @@ function encodeRecord(record: FastCGIRecord, chunkSize: number, encoding: Buffer
         let buffers: Buffer[] = [];
         let buffer = toBuffer(record.data, encoding);
         do {
-            const chunk = buffer.subarray(0, chunkSize);
-            buffer = buffer.subarray(chunkSize);
+            const chunk = buffer.subarray(0, MAX_WRITE_SIZE);
+            buffer = buffer.subarray(MAX_WRITE_SIZE);
             buffers.push(...buildRecord(record, chunkSize, chunk));
         } while (buffer.length);
         return Buffer.concat(buffers);
@@ -127,15 +129,14 @@ export class Encoder extends Transform {
 
     _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback): void {
         if (Array.isArray(chunk)) {
-            this.push(
+            callback(
+                null,
                 Buffer.concat(
                     chunk.map((c) => encodeRecord(c as FastCGIRecord, this.#fitToChunk, encoding))
                 )
             );
-            callback();
             return;
         }
-        this.push(encodeRecord(chunk as FastCGIRecord, this.#fitToChunk, encoding));
-        callback();
+        callback(null, encodeRecord(chunk as FastCGIRecord, this.#fitToChunk, encoding));
     }
 }

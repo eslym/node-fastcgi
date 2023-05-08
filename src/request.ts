@@ -1,5 +1,5 @@
 import { EventEmitter } from './utils/emitter';
-import { Params, Role } from './protocol';
+import { Params, Role, Status } from './protocol';
 import { returnThis } from './utils/noop';
 import { mockRequest } from './utils/http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -7,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 type IncomingRequestEvent = {
     error: (error: Error) => void;
     abort: () => void;
-    end: (status?: number) => void;
+    end: (status?: number, protocolStatus?: Status) => void;
 };
 
 export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
@@ -102,13 +102,13 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
         return this.end(1);
     }
 
-    end(status?: number) {
+    end(status?: number, protocolStatus?: Status) {
         this.end = returnThis;
         this.abort = returnThis;
         this.#ended = true;
         this.#stdout.end();
         this.#stderr.end();
-        this.emit('end', status);
+        this.emit('end', status, protocolStatus);
         return this;
     }
 
@@ -121,7 +121,7 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
 
 type OutgoingRequestEvent = {
     error: (error: Error) => void;
-    end: (status?: number) => void;
+    end: (status?: number, protocolStatus?: Status) => void;
     abort: () => void;
 };
 
