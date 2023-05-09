@@ -1,5 +1,5 @@
 import { Socket, isIPv4 } from 'node:net';
-import { Duplex } from 'node:stream';
+import { Duplex, PassThrough } from 'node:stream';
 import { noop } from './noop';
 import { Params } from '../protocol';
 import { IncomingRequest } from '../request';
@@ -82,15 +82,20 @@ export function mockRequest(req: IncomingRequest) {
             bytesRead += chunk.length;
             request.push(chunk);
             if (bytesRead >= contentLength) {
+                request.complete = true;
                 request.push(null);
                 req.stdin.off('data', read);
             }
         };
         req.stdin.on('data', read);
         req.stdin.once('end', () => {
+            request.complete = true;
             request.push(null);
             req.stdin.off('data', read);
         });
+    } else {
+        request.complete = true;
+        request.push(null);
     }
 
     const qs =
