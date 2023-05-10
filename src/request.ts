@@ -10,6 +10,9 @@ type IncomingRequestEvent = {
     end: (status?: number, protocolStatus?: Status) => void;
 };
 
+/**
+ * Represents an incoming request from webserver.
+ */
 export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
     #role: Role;
     #stdin: NodeJS.ReadableStream;
@@ -23,46 +26,81 @@ export class IncomingRequest extends EventEmitter<IncomingRequestEvent> {
 
     #params: Params;
 
+    /**
+     * The role of the request.
+     */
     get role(): Role {
         return this.#role;
     }
 
+    /**
+     * The request's stdin stream.
+     */
     get stdin(): NodeJS.ReadableStream {
         return this.#stdin;
     }
 
+    /**
+     * The request's data stream.
+     */
     get data(): NodeJS.ReadableStream {
         return this.#data;
     }
 
+    /**
+     * The request's stdout stream.
+     */
     get stdout(): NodeJS.WritableStream {
         return this.#stdout;
     }
 
+    /**
+     * The request's stderr stream.
+     */
     get stderr(): NodeJS.WritableStream {
         return this.#stderr;
     }
 
+    /**
+     * The request's params.
+     */
     get params(): Params {
         return this.#params;
     }
 
+    /**
+     * Whether the request has ended.
+     */
     get ended(): boolean {
         return this.#ended;
     }
 
+    /**
+     * Whether the request has been aborted.
+     */
     get aborted(): boolean {
         return this.#aborted;
     }
 
+    /**
+     * The request's abort signal.
+     */
     get abortedSignal(): AbortSignal {
         return this.#abortController.signal;
     }
 
+    /**
+     * Mocking the request into an http.IncomingMessage for compatibility.
+     * ex: used as standard `res` argument for Express.
+     */
     get incomingMessage(): IncomingMessage {
         return this.#mockRequest().request;
     }
 
+    /**
+     * Mocking the response into an http.ServerResponse for compatibility.
+     * ex: used as standard `res` argument for Express.
+     */
     get serverResponse(): ServerResponse {
         return this.#mockRequest().response;
     }
@@ -125,6 +163,14 @@ type OutgoingRequestEvent = {
     abort: () => void;
 };
 
+/**
+ * Represents an outgoing request to FastCGI server.
+ * Since making a FastCGI request is relatively complicated than serving one,
+ * this class is provided to simplify the process, http API mocking is not provided.
+ *
+ * p/s: Making a FastCGI request requires Params to be properly set, ex:
+ * `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `TRANSLATED_PATH`, etc.
+ */
 export class OutgoingRequest extends EventEmitter<OutgoingRequestEvent> {
     #params: Params;
     #stdin: NodeJS.WritableStream;

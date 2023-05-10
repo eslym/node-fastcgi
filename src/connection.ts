@@ -82,13 +82,24 @@ export interface IncomingConnectionConfig {
     paddingFit?: number;
 }
 
+/**
+ * Represents a fastcgi connection from webserver.
+ * @fires IncomingConnection#request
+ * @event IncomingConnection#request
+ * @type {IncomingRequest} request incoming from the socket.
+ */
 export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap> {
+    #socket: Duplex;
     #stream: Duplex;
     #requests: Map<number, IncomingRequest> = new Map();
     #pendingRequests: Map<number, BeginRequestRecord & { params?: Params }> = new Map();
     #config: IncomingConnectionConfig;
 
     #closeConnection = false;
+
+    get socket(): Duplex {
+        return this.#socket;
+    }
 
     get stream(): Duplex {
         return this.#stream;
@@ -107,6 +118,8 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
         };
 
         io.writable.pipe(stream).pipe(io.readable);
+
+        this.#socket = stream;
 
         this.#stream = Duplex.from(io);
 
@@ -197,8 +210,8 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                     cleanup.set(request, () => {
                         if (!stdin.readableEnded) stdin.push(null);
                         if (!data.readableEnded) data.push(null);
-                        // if (!stdout.closed) stdout.end();
-                        // if (!stderr.closed) stderr.end();
+                        if (!stdout.closed) stdout.end();
+                        if (!stderr.closed) stderr.end();
                     });
                     this.#requests.set(record.requestId, request);
                     request.once(
@@ -212,7 +225,7 @@ export class IncomingConnection extends EventEmitter<IncomingConnectionEventMap>
                             });
                             destroyRequest(request);
                             this.#requests.delete(record.requestId);
-                            if (this.#closeConnection) {
+                            if (this.#closeConnection && this.#requests.size === 0) {
                                 this.close();
                             }
                         }
@@ -283,19 +296,25 @@ type OutgoingConnectionEventMap = {
 interface BeginRequestOptions {
     role?: Role;
     keepAlive?: boolean;
-    serverSoftware?: string;
 }
 
+/**
+ * A connection to a FastCGI server.
+ */
 export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap> {
+    #socket: Duplex;
     #stream: Duplex;
     #config?: Config;
-    #encoder: Encoder;
 
     #requests: Map<number, OutgoingRequest> = new Map();
 
     #pendingGetValues: Set<(values: Config) => void> = new Set();
 
     #accId: number = 0;
+
+    get socket(): Duplex {
+        return this.#socket;
+    }
 
     get stream(): Duplex {
         return this.#stream;
@@ -310,10 +329,12 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
 
         const io = {
             readable: new Decoder(),
-            writable: (this.#encoder = new Encoder(paddingFit))
+            writable: new Encoder(paddingFit)
         };
 
         io.writable.pipe(stream).pipe(io.readable);
+
+        this.#socket = stream;
 
         this.#stream = Duplex.from(io);
 
@@ -336,10 +357,21 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         });
     }
 
+    /**
+     * Begin a FastCGI request.
+     *
+     * Note: If the upstream is a properly implemented FastCGI server, the params like
+     * `DOCUMENT_ROOT`, `SCRIPT_FILENAME`, `PATH_INFO`, `TRANSLATED_PATH`, etc should be set properly.
+     *
+     * @param params FastCGI parameters
+     * @param options
+     * @returns the request
+     */
     async beginRequest(
         params: Params,
-        { role = Role.RESPONDER, keepAlive = true }: BeginRequestOptions = {}
+        options: BeginRequestOptions = {}
     ): Promise<OutgoingRequest> {
+        const { role = Role.RESPONDER, keepAlive = true } = options;
         if (this.#requests.size >= 0xffff) {
             throw new Error('Too many requests');
         }
@@ -358,6 +390,8 @@ export class OutgoingConnection extends EventEmitter<OutgoingConnectionEventMap>
         cleanup.set(request, () => {
             if (!opts.stdout.readableEnded) opts.stdout.push(null);
             if (!opts.stderr.readableEnded) opts.stderr.push(null);
+            if (!opts.stdin.writableEnded) opts.stdin.end();
+            if (!opts.data.writableEnded) opts.data.end();
         });
         this.#requests.set(requestId, request);
         const records: FastCGIRecord[] = [
